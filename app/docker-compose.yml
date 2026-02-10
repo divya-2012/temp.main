@@ -13,8 +13,11 @@ services:
       - /app/.next
     environment:
       - NODE_ENV=development
+      - NODE_OPTIONS=--max-old-space-size=2048
     env_file:
       - .env.docker
+    mem_limit: 4g
+    memswap_limit: 4g
     depends_on:
       postgres:
         condition: service_healthy
