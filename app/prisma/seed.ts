@@ -6,13 +6,17 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Seeding database...');
 
+  const adminEmail = process.env.ADMIN_EMAIL || 'logeshtv21@gmail.com';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Qwer1234@';
+  const adminFirmName = process.env.ADMIN_FIRM || 'Legal AI & Associates';
+
   // 1. Create firm
   const firm = await prisma.firm.upsert({
     where: { id: 'seed-firm-001' },
-    update: {},
+    update: { name: adminFirmName },
     create: {
       id: 'seed-firm-001',
-      name: 'Legal AI & Associates',
+      name: adminFirmName,
       address: '100 Law Street, Suite 500, San Francisco, CA 94105',
       phone: '(415) 555-0100',
       website: 'https://legalai-associates.com',
@@ -21,12 +25,12 @@ async function main() {
   console.log('  ✓ Firm created:', firm.name);
 
   // 2. Create admin user
-  const adminPasswordHash = await bcrypt.hash('Qwer1234@', 12);
+  const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
   const admin = await prisma.user.upsert({
-    where: { email: 'logeshtv21@gmail.com' },
+    where: { email: adminEmail },
     update: { passwordHash: adminPasswordHash },
     create: {
-      email: 'logeshtv21@gmail.com',
+      email: adminEmail,
       passwordHash: adminPasswordHash,
       firstName: 'Logesh',
       lastName: 'TV',
