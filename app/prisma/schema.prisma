@@ -1,0 +1,505 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  ADMIN
+  MANAGING_PARTNER
+  ATTORNEY
+  PARALEGAL
+  LEGAL_ASSISTANT
+  CLIENT
+}
+
+enum CaseStatus {
+  OPEN
+  IN_PROGRESS
+  ON_HOLD
+  CLOSED
+  ARCHIVED
+}
+
+enum CasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ClientType {
+  INDIVIDUAL
+  COMPANY
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  ANALYZED
+  ERROR
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum EventType {
+  HEARING
+  MEETING
+  DEADLINE
+  TASK
+  REMINDER
+  OTHER
+}
+
+enum ComplianceStatus {
+  PENDING
+  COMPLIANT
+  NON_COMPLIANT
+  OVERDUE
+}
+
+enum TimelineEventType {
+  CASE_CREATED
+  STATUS_CHANGED
+  DOCUMENT_ADDED
+  NOTE_ADDED
+  TASK_CREATED
+  TASK_COMPLETED
+  HEARING_SCHEDULED
+  CLIENT_COMMUNICATION
+  BILLING_ENTRY
+  OTHER
+}
+
+// ============================================================
+// MULTI-TENANCY: FIRM
+// ============================================================
+
+model Firm {
+  id        String   @id @default(uuid())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  website   String?
+  logo      String?
+  settings  Json?    @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  cases           Case[]
+  clients         Client[]
+  documents       Document[]
+  invoices        Invoice[]
+  calendarEvents  CalendarEvent[]
+  complianceItems ComplianceItem[]
+  auditLogs       AuditLog[]
+
+  @@map("firms")
+}
+
+// ============================================================
+// USERS & AUTH
+// ============================================================
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         UserRole @default(ATTORNEY)
+  phone        String?
+  avatar       String?
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  firmId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  firm             Firm              @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  assignedCases    CaseAssignment[]
+  tasks            Task[]
+  timeEntries      TimeEntry[]
+  documents        Document[]        @relation("UploadedBy")
+  notes            Note[]
+  auditLogs        AuditLog[]
+  calendarEvents   CalendarEvent[]   @relation("EventCreator")
+  assignedEvents   CalendarEvent[]   @relation("EventAssignees")
+  caseTimelines    CaseTimeline[]
+
+  @@index([firmId])
+  @@index([email])
+  @@map("users")
+}
+
+// ============================================================
+// CASES
+// ============================================================
+
+model Case {
+  id              String       @id @default(uuid())
+  caseNumber      String
+  title           String
+  description     String?      @db.Text
+  status          CaseStatus   @default(OPEN)
+  priority        CasePriority @default(MEDIUM)
+  practiceArea    String?
+  courtName       String?
+  courtCaseNo     String?
+  filingDate      DateTime?
+  nextHearingDate DateTime?
+  closedDate      DateTime?
+  firmId          String
+  clientId        String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  firm           Firm              @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  client         Client?           @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  assignments    CaseAssignment[]
+  documents      Document[]
+  tasks          Task[]
+  timeEntries    TimeEntry[]
+  invoices       Invoice[]
+  notes          Note[]
+  timeline       CaseTimeline[]
+  calendarEvents CalendarEvent[]
+
+  @@unique([firmId, caseNumber])
+  @@index([firmId])
+  @@index([clientId])
+  @@index([status])
+  @@map("cases")
+}
+
+model CaseAssignment {
+  id         String   @id @default(uuid())
+  caseId     String
+  userId     String
+  role       String   @default("attorney")
+  isLead     Boolean  @default(false)
+  assignedAt DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, userId])
+  @@map("case_assignments")
+}
+
+model CaseTimeline {
+  id          String            @id @default(uuid())
+  caseId      String
+  userId      String?
+  eventType   TimelineEventType
+  title       String
+  description String?           @db.Text
+  metadata    Json?
+  createdAt   DateTime          @default(now())
+
+  case Case  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([caseId])
+  @@index([createdAt])
+  @@map("case_timelines")
+}
+
+// ============================================================
+// CLIENTS
+// ============================================================
+
+model Client {
+  id          String     @id @default(uuid())
+  type        ClientType @default(INDIVIDUAL)
+  firstName   String?
+  lastName    String?
+  companyName String?
+  email       String?
+  phone       String?
+  address     String?    @db.Text
+  notes       String?    @db.Text
+  firmId      String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  firm      Firm       @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  cases     Case[]
+  documents Document[]
+  invoices  Invoice[]
+
+  @@index([firmId])
+  @@index([email])
+  @@map("clients")
+}
+
+// ============================================================
+// DOCUMENTS
+// ============================================================
+
+model Document {
+  id           String         @id @default(uuid())
+  name         String
+  originalName String
+  mimeType     String
+  size         Int
+  storagePath  String
+  status       DocumentStatus @default(UPLOADED)
+  tags         String[]
+  aiSummary    String?        @db.Text
+  aiEntities   Json?
+  vectorIds    String[]
+  firmId       String
+  caseId       String?
+  clientId     String?
+  uploadedById String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  firm       Firm    @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  case       Case?   @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  client     Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  uploadedBy User?   @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([firmId])
+  @@index([caseId])
+  @@index([clientId])
+  @@map("documents")
+}
+
+// ============================================================
+// TASKS
+// ============================================================
+
+model Task {
+  id          String       @id @default(uuid())
+  title       String
+  description String?      @db.Text
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?
+  completedAt DateTime?
+  caseId      String?
+  assigneeId  String?
+  firmId      String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  case     Case? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  assignee User? @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@index([firmId])
+  @@index([caseId])
+  @@index([assigneeId])
+  @@index([status])
+  @@map("tasks")
+}
+
+// ============================================================
+// BILLING
+// ============================================================
+
+model TimeEntry {
+  id          String   @id @default(uuid())
+  description String
+  hours       Float
+  rate        Float
+  amount      Float
+  date        DateTime
+  billable    Boolean  @default(true)
+  caseId      String?
+  userId      String
+  invoiceId   String?
+  firmId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  case    Case?    @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([firmId])
+  @@index([caseId])
+  @@index([userId])
+  @@map("time_entries")
+}
+
+model Invoice {
+  id        String        @id @default(uuid())
+  invoiceNo String
+  status    InvoiceStatus @default(DRAFT)
+  issueDate DateTime      @default(now())
+  dueDate   DateTime
+  subtotal  Float         @default(0)
+  tax       Float         @default(0)
+  total     Float         @default(0)
+  notes     String?       @db.Text
+  caseId    String?
+  clientId  String?
+  firmId    String
+  paidAt    DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  case        Case?       @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  client      Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  firm        Firm        @relation(fields: [firmId], references: [id])
+  timeEntries TimeEntry[]
+  expenses    Expense[]
+
+  @@unique([firmId, invoiceNo])
+  @@index([firmId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  description String
+  amount      Float
+  date        DateTime
+  category    String?
+  receipt     String?
+  invoiceId   String?
+  caseId      String?
+  firmId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([firmId])
+  @@index([caseId])
+  @@map("expenses")
+}
+
+// ============================================================
+// CALENDAR
+// ============================================================
+
+model CalendarEvent {
+  id          String    @id @default(uuid())
+  title       String
+  description String?   @db.Text
+  type        EventType @default(OTHER)
+  startTime   DateTime
+  endTime     DateTime?
+  allDay      Boolean   @default(false)
+  location    String?
+  caseId      String?
+  createdById String?
+  firmId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  firm      Firm   @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  case      Case?  @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("EventCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  assignees User[] @relation("EventAssignees")
+
+  @@index([firmId])
+  @@index([caseId])
+  @@index([startTime])
+  @@map("calendar_events")
+}
+
+// ============================================================
+// COMPLIANCE
+// ============================================================
+
+model ComplianceItem {
+  id          String           @id @default(uuid())
+  title       String
+  description String?          @db.Text
+  status      ComplianceStatus @default(PENDING)
+  category    String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  riskLevel   String?
+  firmId      String
+  caseId      String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  firm Firm @relation(fields: [firmId], references: [id], onDelete: Cascade)
+
+  @@index([firmId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("compliance_items")
+}
+
+// ============================================================
+// NOTES
+// ============================================================
+
+model Note {
+  id        String   @id @default(uuid())
+  content   String   @db.Text
+  caseId    String?
+  authorId  String?
+  firmId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  case   Case? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([firmId])
+  @@index([caseId])
+  @@map("notes")
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  ipAddress String?
+  userId    String?
+  firmId    String
+  createdAt DateTime @default(now())
+
+  firm Firm  @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([firmId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
