@@ -4,7 +4,7 @@ services:
   web:
     image: node:20-alpine
     working_dir: /app
-    command: sh -c "npm run dev"
+    command: npm run dev
     ports:
       - "3000:3000"
     volumes:
